@@ -185,7 +185,7 @@ app.get('/api/get-attraction-detail', async (req, res) => {
     };
 
     const options = {
-        method: 'GET', // Metode GET
+        method: 'POST', // Metode GET
         url: ATTRACTIONS_DETAIL_ENDPOINT,
         headers: headers,
         data: requestBody // GET dengan Body
