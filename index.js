@@ -4,65 +4,84 @@ const moment = require('moment');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const CryptoJS = require('crypto-js'); // Untuk SHA256
-const stableStringify = require('json-stable-stringify'); // Untuk Minify JSON yang konsisten
+const CryptoJS = require('crypto-js');
+const stableStringify = require('json-stable-stringify'); // Tetap diimport untuk keperluan debug log
 
 const app = express();
 const PORT = 3000;
 
-// Middleware untuk memproses JSON request body
 app.use(express.json());
 
 // --- KONSTANTA UTAMA KLIKOO API ---
 const BASE_URL = 'pvpapi.stage.pvg.im/klikoo-b2b';
+
 const AUTH_SIGNATURE_ENDPOINT = `https://${BASE_URL}/v1/open-api/auth-signature`;
 const ACCESS_TOKEN_ENDPOINT = `https://${BASE_URL}/v1/open-api/access-token`;
+const BALANCE_ENDPOINT = `https://${BASE_URL}/v1/open-api/balance`;
 const ATTRACTIONS_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/attractions/detail`;
+const BOARDING_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/sources`;
+const DESTINATION_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/destinations`;
+
+
+// Kredensial Anda
 const CLIENT_ID = '8670d916-9d10-45b9-a091-82b9dedd9b53';
-const CLIENT_SECRET = 'vylmiqtm91jq74ct537pdw5vqq05retj'; // Client Secret
-const PRIVATE_KEY_FILE = 'privatekey.pem'; // Nama file kunci Anda
+const CLIENT_SECRET = 'vylmiqtm91jq74ct537pdw5vqq05retj';
+const PRIVATE_KEY_FILE = 'privatekey.pem';
+
 const PRODUCT_CODE_ATTRACTION = "ATRAKSI-DANCER";
+const METHOD_POST = 'POST';
+const METHOD_GET = 'GET';
 // ------------------------------------
 
-
+// ------------------------------------------------------------------
 // --- FUNGSI UTILITY: MENGHITUNG DIGITAL SIGNATURE (HMAC-SHA512) ---
-/**
- * Menghitung Digital Signature sesuai dokumentasi.
- * string_to_sign = METHOD:PATH:TOKEN:HASHED_PAYLOAD:TIMESTAMP
- */
+// ------------------------------------------------------------------
 function generateDigitalSignature(method, path, token, payload, timestamp) {
-    // 1. Minify JSON (dengan urutan kunci yang stabil)
-    const minifiedPayload = stableStringify(payload);
 
-    // 2. hashed_payload = hexEncode(sha256(minifyJSON(payload)))
-    const hashedPayload = CryptoJS.SHA256(minifiedPayload).toString(CryptoJS.enc.Hex);
+    let stringToHash;
+
+    if (method === METHOD_GET && Object.keys(payload).length === 0) {
+        stringToHash = "";
+        console.log(`[SIG-DEBUG] Payload untuk Hashing (GET Kosong): ""`);
+    } else {
+        // ✅ PERBAIKAN KRUSIAL: Gunakan JSON.stringify() dan andalkan urutan key 
+        // yang dibuat di handler (product_code, lalu keyword), karena stableStringify gagal.
+        stringToHash = JSON.stringify(payload);
+        console.log(`[SIG-DEBUG] JSON.stringify Payload (Expected Order: {"product_code":"BUS","keyword":"bandung"}): ${stringToHash}`);
+    }
+
+    // 2. hashed_payload = hexEncode(sha256(stringToHash))
+    const hashedPayload = CryptoJS.SHA256(stringToHash).toString(CryptoJS.enc.Hex);
 
     // 3. Bentuk string_to_sign
     const stringToSign = `${method}:${path}:${token}:${hashedPayload}:${timestamp}`;
 
     console.log(`[SIG-DIGITAL] String To Sign: ${stringToSign}`);
+    console.log(`[SIG-DIGITAL] Hashed Payload: ${hashedPayload}`);
 
-    // 4. Hitung HMAC-SHA512 dari string_to_sign menggunakan CLIENT_SECRET, lalu Base64 encode
-    const hmac = crypto.createHmac('sha512', CLIENT_SECRET);
+    // 4. Hitung HMAC-SHA512
+    const cleanSecret = CLIENT_SECRET.trim();
+    const hmac = crypto.createHmac('sha512', cleanSecret, 'utf8');
     hmac.update(stringToSign);
     const signatureBase64 = hmac.digest('base64');
 
     return signatureBase64;
 }
-// ------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------------------
+// --- FUNGSI UTILITY: MENDAPATKAN AUTH SIGNATURE (LANGKAH 1 & 2) ---
+// ----------------------------------------------------------------------------------------
 
-// --- FUNGSI UTILITY: MENDAPATKAN AUTH SIGNATURE (LANGKAH 1) ---
 async function getAuthSignature() {
     let privateKeyBase64;
     try {
         const privateKeyContent = fs.readFileSync(path.join(__dirname, PRIVATE_KEY_FILE), 'utf-8');
-        privateKeyBase64 = Buffer.from(privateKeyContent).toString('base64');
+        privateKeyBase64 = Buffer.from(privateKeyContent).toString('base64').replace(/\n/g, '');
     } catch (err) {
         throw new Error(`Gagal membaca Private Key: ${err.message}. Pastikan file ${PRIVATE_KEY_FILE} ada.`);
     }
 
-    // Timestamp harus cocok dengan Open-Api-Timestamp Header
+    // Timestamp Langkah 1 & 2 tetap menggunakan format panjang (.000)
     const timestamp = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
 
     const requestBody = { client_id: CLIENT_ID, timestamp: timestamp, private_key: privateKeyBase64 };
@@ -91,10 +110,7 @@ async function getAuthSignature() {
         throw new Error(`Gagal API Auth Signature: ${error.message}`);
     }
 }
-// ----------------------------------------------------------------------------------------
 
-
-// --- FUNGSI UTILITY: MENDAPATKAN ACCESS TOKEN (LANGKAH 2) ---
 async function getAccessToken() {
     let authData;
     try {
@@ -103,9 +119,11 @@ async function getAccessToken() {
         throw new Error(`Kesalahan pra-autentikasi (Auth Signature): ${error.message}`);
     }
 
+    const cleanSecret = CLIENT_SECRET.trim();
+
     const requestBody = {
         grant_type: "client_credentials",
-        additional_info: { client_id: CLIENT_ID, client_secret: CLIENT_SECRET }
+        additional_info: { client_id: CLIENT_ID, client_secret: cleanSecret }
     };
 
     const headers = {
@@ -123,9 +141,7 @@ async function getAccessToken() {
         console.log("[TOKEN] Memanggil API Access Token...");
         const response = await axios(options);
 
-        // ✅ Penanganan yang lebih robust untuk 'access_token'
         const accessToken = response.data.access_token || response.data.data?.access_token;
-
         if (!accessToken) {
             console.error("[TOKEN] GAGAL: 'access_token' tidak ditemukan. Respons Penuh:", response.data);
             throw new Error("Properti 'access_token' tidak ditemukan di response API Access Token.");
@@ -133,33 +149,115 @@ async function getAccessToken() {
 
         console.log("[TOKEN] Access Token berhasil diterima.");
         return accessToken;
-
     } catch (error) {
         if (error.response) {
             const errMsg = error.response.data.response_message || error.response.statusText || 'Kesalahan dari API Token';
             console.error(`[TOKEN] GAGAL DENGAN STATUS ${error.response.status}. Pesan API: ${errMsg}`);
-            console.error("[TOKEN] Error Response Penuh:", error.response.data);
             throw new Error(`Error saat memanggil API Access Token (${error.response.status}): ${errMsg}`);
         }
         throw new Error(`Gagal API Access Token: ${error.message}`);
     }
 }
+
+
+// ----------------------------------------------------------------------------------------
+// --- FUNGSI UTILITY: HANDLER UMUM UNTUK API YANG MEMBUTUHKAN DIGITAL SIGNATURE ---
+// ----------------------------------------------------------------------------------------
+async function callSignedApi(apiType, endpointURL, endpointPath, method, requestBody, res) {
+    let accessToken;
+    try {
+        accessToken = await getAccessToken();
+    } catch (error) {
+        return res.status(500).json({
+            message: `Gagal mendapatkan ${apiType} karena masalah Access Token.`,
+            details: error.message
+        });
+    }
+
+    const token = accessToken;
+
+    // Timestamp Langkah 3 harus Panjang (.000)
+    const unifiedTimestampLangkah3 = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
+    const timestampSig = unifiedTimestampLangkah3;
+    const timestampHeader = unifiedTimestampLangkah3;
+
+    const signaturePayload = (method === METHOD_GET) ? {} : requestBody;
+
+    let digitalSignature;
+    try {
+        // Hashing akan menggunakan JSON.stringify, menjaga urutan product_code lalu keyword
+        digitalSignature = generateDigitalSignature(method, endpointPath, token, signaturePayload, timestampSig);
+    } catch (error) {
+        console.error(`Kesalahan menghitung Digital Signature untuk ${apiType}:`, error.message);
+        return res.status(500).json({
+            message: 'Gagal menghitung Digital Signature.',
+            details: error.message
+        });
+    }
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'Open-Api-Timestamp': timestampHeader,
+        'Open-Api-Signature': digitalSignature,
+        'Authorization': `Bearer ${accessToken}`
+    };
+
+    const options = {
+        method: method,
+        url: endpointURL,
+        headers: headers,
+        ...(method === METHOD_POST && { data: requestBody })
+    };
+
+    console.log(`[${apiType}] Request Headers:`, headers);
+    // Logging request body yang benar (sesuai yang dikirim ke API)
+    console.log(`[${apiType}] Request Body Sent: ${JSON.stringify(requestBody)}`);
+
+
+    try {
+        console.log(`[${apiType}] Memanggil API: ${endpointURL}`);
+        const response = await axios(options);
+
+        // Jika respons sukses
+        if (response.data) {
+            console.log(`[${apiType}] Data berhasil diterima. Status: ${response.status}`);
+            res.status(response.status).json(response.data);
+        } else {
+            console.warn(`[${apiType}] RESPON KOSONG/NULL. Status: ${response.status}`);
+            res.status(response.status).json({ message: "Panggilan sukses, tetapi data yang dikembalikan kosong.", response_data_raw: response.data });
+        }
+    } catch (error) {
+        if (error.response) {
+            // Penanganan error dari API (4xx atau 5xx)
+            const errMsg = error.response.data.response_message || error.response.statusText || 'Kesalahan dari API';
+            console.error(`[${apiType}] GAGAL DENGAN STATUS ${error.response.status}. Pesan API: ${errMsg}`);
+
+            return res.status(error.response.status).json({
+                message: `Gagal mendapatkan ${apiType}.`,
+                details: error.response.data,
+                signature_failed_debug: {
+                    endpoint_path: endpointPath,
+                    method: method,
+                    timestamp_header: timestampHeader,
+                    timestamp_sig: timestampSig,
+                    signature_payload_used: signaturePayload,
+                }
+            });
+        }
+        // ✅ PERBAIKAN: Penanganan error internal atau jaringan
+        console.error(`[${apiType}] Kesalahan server internal atau jaringan:`, error.message);
+        res.status(500).json({
+            message: 'Kesalahan server internal atau jaringan.',
+            details: error.message // Pastikan error.message digunakan
+        });
+    }
+}
+
+// ----------------------------------------------------------------------------------------
+// --- ENDPOINT DEFINITIONS ---
 // ----------------------------------------------------------------------------------------
 
-
-// --- 1. ENDPOINT: Debug/Verifikasi Auth Signature ---
-app.get('/api/get-auth-signature', async (req, res) => {
-    try {
-        const result = await getAuthSignature();
-        res.status(200).json(result);
-    } catch (error) {
-        console.error("Error di /api/get-auth-signature:", error.message);
-        res.status(500).json({ message: error.message });
-    }
-});
-
-
-// --- 2. ENDPOINT: Mendapatkan Access Token ---
+// 1. ENDPOINT: Mendapatkan Access Token (Debugging - GET)
 app.get('/api/get-access-token', async (req, res) => {
     console.log("--- Memulai Proses Get Access Token ---");
     try {
@@ -171,112 +269,77 @@ app.get('/api/get-access-token', async (req, res) => {
     }
 });
 
+// 2. 💰 ENDPOINT: Client Balance (GET)
+app.get('/api/client-balance', async (req, res) => {
+    const apiType = 'CLIENT_BALANCE';
+    const endpointPath = '/v1/open-api/balance';
+    const endpointURL = BALANCE_ENDPOINT;
 
-// --- 3. ENDPOINT: Mendapatkan Detail Atraksi (Menggunakan Digital Signature) ---
-app.get('/api/get-attraction-detail', async (req, res) => {
-    console.log("--- Memulai Proses Get Product Attraction ---");
+    const requestBody = {};
 
-    let accessToken;
-    try {
-        // Langkah 1 & 2: Dapatkan Access Token terlebih dahulu
-        accessToken = await getAccessToken();
-    } catch (error) {
-        console.error("Kesalahan Access Token:", error.message);
-        return res.status(500).json({
-            message: 'Gagal mendapatkan Detail Atraksi karena masalah Access Token.',
-            details: error.message
-        });
-    }
+    console.log(`--- Memulai Proses Get ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_GET, requestBody, res);
+});
 
-    // Langkah 3: Hitung Digital Signature
 
-    // Nilai untuk perhitungan Signature dan Request Body
-    const method = 'POST';
-    const path = '/v1/open-api/attractions/detail';
-    const token = accessToken;
+// 3. ENDPOINT: Mendapatkan Detail Atraksi (POST)
+app.post('/api/get-attraction-detail', async (req, res) => {
+    const apiType = 'ATRAKSI';
+    const endpointPath = '/v1/open-api/attractions/detail';
+    const endpointURL = ATTRACTIONS_DETAIL_ENDPOINT;
     const requestBody = { product_code: PRODUCT_CODE_ATTRACTION };
-    // Timestamp harus sama di Header dan String to Sign. Format: yyyy-MM-dd'T'HH:mm:ss+Z
-    const timestamp = moment().format('YYYY-MM-DDTHH:mm:ss+07:00');
 
-    let digitalSignature;
-    try {
-        digitalSignature = generateDigitalSignature(method, path, token, requestBody, timestamp);
-        console.log(`[DETAIL] Digital Signature Final: ${digitalSignature}`);
-    } catch (error) {
-        console.error("Kesalahan menghitung Digital Signature:", error.message);
-        return res.status(500).json({
-            message: 'Gagal menghitung Digital Signature.',
-            details: error.message
-        });
+    console.log(`--- Memulai Proses Get Product ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
+// 4. 🚉 ENDPOINT: Boarding Location (POST)
+app.post('/api/transports/boarding-location', async (req, res) => {
+    const apiType = 'BOARDING_LOCATION';
+    const endpointPath = '/v1/open-api/transports/sources';
+    const endpointURL = BOARDING_LOCATION_ENDPOINT;
+
+    const { product_code, keyword } = req.body;
+    if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
+
+    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    let requestBody = { product_code: product_code.toUpperCase() };
+    if (keyword) {
+        requestBody.keyword = keyword;
     }
 
-    // Buat Header Request
-    const headers = {
-        'Content-Type': 'application/json',
-        'Open-Api-Timestamp': timestamp,
-        'Open-Api-Signature': digitalSignature,
-        'Authorization': `Bearer ${accessToken}`
-    };
+    console.log(`--- Memulai Proses Get Transport Location (${apiType}) ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
 
-    const options = {
-        method: method,
-        url: ATTRACTIONS_DETAIL_ENDPOINT,
-        headers: headers,
-        data: requestBody
-    };
+// 5. 📍 ENDPOINT: Destination Location (POST)
+app.post('/api/transports/destination-location', async (req, res) => {
+    const apiType = 'DESTINATION_LOCATION';
+    const endpointPath = '/v1/open-api/transports/destinations';
+    const endpointURL = DESTINATION_LOCATION_ENDPOINT;
 
-    console.log("[DETAIL] Request Headers:", headers);
-    console.log("[DETAIL] Request Body:", requestBody);
+    const { product_code, keyword } = req.body;
+    if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
 
-    try {
-        console.log(`[DETAIL] Memanggil API: ${ATTRACTIONS_DETAIL_ENDPOINT}`);
-
-        const response = await axios(options);
-
-        // 💡 PENAMBAHAN DEBUGGING BARU 💡
-        console.log(`[DETAIL] Response Status: ${response.status}`);
-        console.log(`[DETAIL] Response Headers:`, response.headers);
-        console.log(`[DETAIL] Response Data (Raw):`, response.data);
-        console.log(`[DETAIL] Type of Response Data: ${typeof response.data}`);
-        // 💡 END DEBUGGING BARU 💡
-
-        if (response.data && (typeof response.data === 'object' || response.data.length > 0)) {
-            console.log("[DETAIL] Detail Atraksi berhasil diterima.");
-            // Kirim response data yang sudah di-parse
-            res.status(response.status).json(response.data);
-        } else {
-            // Jika status 2xx tapi body kosong
-            console.warn("[DETAIL] RESPON KOSONG/NULL: Status sukses, tetapi body kosong.");
-            res.status(response.status).json({
-                message: "Panggilan sukses, tetapi data yang dikembalikan kosong. Mungkin 'product_code' tidak ditemukan atau data produknya kosong.",
-                response_data_raw: response.data
-            });
-        }
-
-
-    } catch (error) {
-        if (error.response) {
-            const errMsg = error.response.data.response_message || error.response.statusText || 'Kesalahan dari API Detail Atraksi';
-            console.error(`[DETAIL] GAGAL DENGAN STATUS ${error.response.status}. Pesan API: ${errMsg}`);
-            console.error("[DETAIL] Error Response Penuh:", error.response.data);
-
-            return res.status(error.response.status).json({
-                message: 'Gagal mendapatkan Detail Atraksi.',
-                details: error.response.data
-            });
-        }
-        console.error("[DETAIL] Kesalahan server internal atau jaringan:", error.message);
-        res.status(500).json({
-            message: 'Kesalahan server internal atau jaringan.',
-            details: error.message
-        });
+    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    let requestBody = { product_code: product_code.toUpperCase() };
+    if (keyword) {
+        requestBody.keyword = keyword;
     }
+
+    console.log(`--- Memulai Proses Get Transport Location (${apiType}) ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
 
 // --- SERVER LISTENER ---
 app.listen(PORT, () => {
-    console.log(`🚀 Server berjalan di http://localhost:${PORT}`);
-    console.log(`Akses API:`);
-    console.log(`- Token: http://localhost:${PORT}/api/get-access-token`);
-    console.log(`- Atraksi: http://localhost:${PORT}/api/get-attraction-detail`);
+    console.log(`\n======================================================`);
+    console.log(`🚀 Server Klikoo B2B berjalan di http://localhost:${PORT}`);
+    console.log(`======================================================`);
+    console.log(`\n📌 Endpoint Tersedia:`);
+    console.log(`- SALDO (GET): http://localhost:${PORT}/api/client-balance`);
+    console.log(`- Boarding (POST): http://localhost:${PORT}/api/transports/boarding-location`);
+    console.log(`- Destination (POST): http://localhost:${PORT}/api/transports/destination-location`);
+    console.log(`\n✅ LANGKAH BERIKUTNYA: Jalankan CURL berikut:`);
+    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/destination-location' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "keyword": "bandung"}'`);
 });
