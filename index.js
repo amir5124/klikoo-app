@@ -5,10 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const CryptoJS = require('crypto-js');
-const stableStringify = require('json-stable-stringify'); // Tetap diimport untuk keperluan debug log
-
+const cors = require('cors');
 const app = express();
 const PORT = 3000;
+app.use(cors());
 
 app.use(express.json());
 
