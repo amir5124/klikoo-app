@@ -21,6 +21,8 @@ const BALANCE_ENDPOINT = `https://${BASE_URL}/v1/open-api/balance`;
 const ATTRACTIONS_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/attractions/detail`;
 const BOARDING_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/sources`;
 const DESTINATION_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/destinations`;
+// 🆕 ENDPOINT BARU UNTUK PENCARIAN JADWAL (TRIPS)
+const AVAILABLE_TRIPS_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips`;
 
 
 // Kredensial Anda
@@ -44,10 +46,11 @@ function generateDigitalSignature(method, path, token, payload, timestamp) {
         stringToHash = "";
         console.log(`[SIG-DEBUG] Payload untuk Hashing (GET Kosong): ""`);
     } else {
-        // ✅ PERBAIKAN KRUSIAL: Gunakan JSON.stringify() dan andalkan urutan key 
-        // yang dibuat di handler (product_code, lalu keyword), karena stableStringify gagal.
+        // PERHATIAN: Pastikan payload memiliki urutan yang konsisten (product_code, lalu field lain)
+        // JSON.stringify() harus digunakan untuk memastikan payload yang di-hash sama persis dengan body
+        // yang dikirim ke API.
         stringToHash = JSON.stringify(payload);
-        console.log(`[SIG-DEBUG] JSON.stringify Payload (Expected Order: {"product_code":"BUS","keyword":"bandung"}): ${stringToHash}`);
+        console.log(`[SIG-DEBUG] JSON.stringify Payload: ${stringToHash}`);
     }
 
     // 2. hashed_payload = hexEncode(sha256(stringToHash))
@@ -181,11 +184,12 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
     const timestampSig = unifiedTimestampLangkah3;
     const timestampHeader = unifiedTimestampLangkah3;
 
+    // Payload yang digunakan untuk signature harus sama dengan Request Body (kecuali GET kosong)
     const signaturePayload = (method === METHOD_GET) ? {} : requestBody;
 
     let digitalSignature;
     try {
-        // Hashing akan menggunakan JSON.stringify, menjaga urutan product_code lalu keyword
+        // Hashing akan menggunakan JSON.stringify pada requestBody
         digitalSignature = generateDigitalSignature(method, endpointPath, token, signaturePayload, timestampSig);
     } catch (error) {
         console.error(`Kesalahan menghitung Digital Signature untuk ${apiType}:`, error.message);
@@ -244,11 +248,11 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
                 }
             });
         }
-        // ✅ PERBAIKAN: Penanganan error internal atau jaringan
+        // Penanganan error internal atau jaringan
         console.error(`[${apiType}] Kesalahan server internal atau jaringan:`, error.message);
         res.status(500).json({
             message: 'Kesalahan server internal atau jaringan.',
-            details: error.message // Pastikan error.message digunakan
+            details: error.message
         });
     }
 }
@@ -302,7 +306,7 @@ app.post('/api/transports/boarding-location', async (req, res) => {
     const { product_code, keyword } = req.body;
     if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
 
-    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    // Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
     let requestBody = { product_code: product_code.toUpperCase() };
     if (keyword) {
         requestBody.keyword = keyword;
@@ -321,7 +325,7 @@ app.post('/api/transports/destination-location', async (req, res) => {
     const { product_code, keyword } = req.body;
     if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
 
-    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    // Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
     let requestBody = { product_code: product_code.toUpperCase() };
     if (keyword) {
         requestBody.keyword = keyword;
@@ -330,6 +334,47 @@ app.post('/api/transports/destination-location', async (req, res) => {
     console.log(`--- Memulai Proses Get Transport Location (${apiType}) ---`);
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
+
+// 6. 🚌 ENDPOINT: Search Available Trips (POST)
+app.post('/api/transports/trips', async (req, res) => {
+    const apiType = 'SEARCH_TRIPS';
+    const endpointPath = '/v1/open-api/transports/trips';
+    const endpointURL = AVAILABLE_TRIPS_ENDPOINT;
+
+    // Destructure dan validasi input dari frontend
+    const { product_code, source_id, destination_id, travel_date } = req.body;
+
+    if (!product_code || !source_id || !destination_id || !travel_date) {
+        return res.status(400).json({
+            message: "Payload tidak lengkap. `product_code`, `source_id`, `destination_id`, dan `travel_date` wajib diisi.",
+            required_fields: ["product_code", "source_id", "destination_id", "travel_date"]
+        });
+    }
+
+    // Konstruksi Request Body untuk API Klikoo B2B
+    // Perhatikan urutan key, terutama product_code di awal
+    const requestBody = {
+        product_code: product_code.toUpperCase(),
+        source_id: Number(source_id), // Mengubah ke Number
+        source_type: "CITY", // Default ke CITY sesuai konteks
+        destination_id: Number(destination_id), // Mengubah ke Number
+        destination_type: "CITY", // Default ke CITY sesuai konteks
+        total_seat: 1, // Default 1 kursi
+        date: travel_date, // Tanggal perjalanan
+        pagination: {
+            limit: 100,
+            page: 1,
+            sort: {
+                field: "boarding_time",
+                value: "asc"
+            }
+        }
+    };
+
+    console.log(`--- Memulai Proses Search Transport Trips (${apiType}) ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
 
 // --- SERVER LISTENER ---
 app.listen(PORT, () => {
@@ -340,6 +385,10 @@ app.listen(PORT, () => {
     console.log(`- SALDO (GET): http://localhost:${PORT}/api/client-balance`);
     console.log(`- Boarding (POST): http://localhost:${PORT}/api/transports/boarding-location`);
     console.log(`- Destination (POST): http://localhost:${PORT}/api/transports/destination-location`);
-    console.log(`\n✅ LANGKAH BERIKUTNYA: Jalankan CURL berikut:`);
-    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/destination-location' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "keyword": "bandung"}'`);
+    console.log(`- Trips (POST): http://localhost:${PORT}/api/transports/trips`);
+
+    // Gunakan tanggal besok untuk CURL testing
+    const testDate = moment().add(1, 'days').format('YYYY-MM-DD');
+    console.log(`\n✅ UJI COBA LANGKAH BERIKUTNYA: Jalankan CURL berikut (menggunakan data tes Banda Aceh: 142 ke Singaraja: 605 pada ${testDate}):`);
+    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/trips' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "source_id": 142, "destination_id": 605, "travel_date": "${testDate}"}'`);
 });
