@@ -21,6 +21,8 @@ const BALANCE_ENDPOINT = `https://${BASE_URL}/v1/open-api/balance`;
 const ATTRACTIONS_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/attractions/detail`;
 const BOARDING_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/sources`;
 const DESTINATION_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/destinations`;
+// ✅ ENDPOINT BARU UNTUK MENCARI JADWAL PERJALANAN
+const TRIPS_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips`;
 
 
 // Kredensial Anda
@@ -44,10 +46,9 @@ function generateDigitalSignature(method, path, token, payload, timestamp) {
         stringToHash = "";
         console.log(`[SIG-DEBUG] Payload untuk Hashing (GET Kosong): ""`);
     } else {
-        // ✅ PERBAIKAN KRUSIAL: Gunakan JSON.stringify() dan andalkan urutan key 
-        // yang dibuat di handler (product_code, lalu keyword), karena stableStringify gagal.
+        // Gunakan JSON.stringify() untuk menghasilkan string JSON dari payload
         stringToHash = JSON.stringify(payload);
-        console.log(`[SIG-DEBUG] JSON.stringify Payload (Expected Order: {"product_code":"BUS","keyword":"bandung"}): ${stringToHash}`);
+        console.log(`[SIG-DEBUG] JSON.stringify Payload (Digunakan untuk Hashing): ${stringToHash}`);
     }
 
     // 2. hashed_payload = hexEncode(sha256(stringToHash))
@@ -185,7 +186,7 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
 
     let digitalSignature;
     try {
-        // Hashing akan menggunakan JSON.stringify, menjaga urutan product_code lalu keyword
+        // Hashing akan menggunakan JSON.stringify pada signaturePayload
         digitalSignature = generateDigitalSignature(method, endpointPath, token, signaturePayload, timestampSig);
     } catch (error) {
         console.error(`Kesalahan menghitung Digital Signature untuk ${apiType}:`, error.message);
@@ -244,7 +245,7 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
                 }
             });
         }
-        // ✅ PERBAIKAN: Penanganan error internal atau jaringan
+        // Penanganan error internal atau jaringan
         console.error(`[${apiType}] Kesalahan server internal atau jaringan:`, error.message);
         res.status(500).json({
             message: 'Kesalahan server internal atau jaringan.',
@@ -302,7 +303,7 @@ app.post('/api/transports/boarding-location', async (req, res) => {
     const { product_code, keyword } = req.body;
     if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
 
-    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    // Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
     let requestBody = { product_code: product_code.toUpperCase() };
     if (keyword) {
         requestBody.keyword = keyword;
@@ -321,7 +322,7 @@ app.post('/api/transports/destination-location', async (req, res) => {
     const { product_code, keyword } = req.body;
     if (!product_code) return res.status(400).json({ message: "**product_code** wajib diisi." });
 
-    // ✅ Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
+    // Penting: Pastikan urutan kunci adalah product_code lalu keyword saat objek dibuat
     let requestBody = { product_code: product_code.toUpperCase() };
     if (keyword) {
         requestBody.keyword = keyword;
@@ -330,6 +331,50 @@ app.post('/api/transports/destination-location', async (req, res) => {
     console.log(`--- Memulai Proses Get Transport Location (${apiType}) ---`);
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
+
+// 6. 🚌 ENDPOINT: Transport Trips / Search Schedule (POST)
+app.post('/api/transports/trips', async (req, res) => {
+    const apiType = 'TRANSPORT_TRIPS';
+    const endpointPath = '/v1/open-api/transports/trips';
+    const endpointURL = TRIPS_ENDPOINT;
+
+    // Data yang wajib dari frontend (travel_date adalah 'date' di API)
+    const { product_code, source_id, destination_id, travel_date } = req.body;
+
+    if (!product_code || !source_id || !destination_id || !travel_date) {
+        return res.status(400).json({
+            message: "product_code, source_id, destination_id, dan travel_date wajib diisi untuk mencari trips."
+        });
+    }
+
+    // Payload lengkap untuk Klikoo API
+    // Menggunakan nilai default untuk fields opsional
+    const requestBody = {
+        product_code: product_code.toUpperCase(),
+        source_id: source_id,
+        // Default ke CITY
+        source_type: "CITY",
+        destination_id: destination_id,
+        // Default ke CITY
+        destination_type: "CITY",
+        // Default total seat ke 1
+        total_seat: 1,
+        date: travel_date, // Mapping travel_date dari frontend ke 'date' di API
+        pagination: {
+            limit: 100,
+            page: 1,
+            sort: {
+                field: "boarding_time",
+                value: "asc"
+            },
+            search: []
+        }
+    };
+
+    console.log(`--- Memulai Proses Search ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
 
 // --- SERVER LISTENER ---
 app.listen(PORT, () => {
@@ -340,6 +385,7 @@ app.listen(PORT, () => {
     console.log(`- SALDO (GET): http://localhost:${PORT}/api/client-balance`);
     console.log(`- Boarding (POST): http://localhost:${PORT}/api/transports/boarding-location`);
     console.log(`- Destination (POST): http://localhost:${PORT}/api/transports/destination-location`);
-    console.log(`\n✅ LANGKAH BERIKUTNYA: Jalankan CURL berikut:`);
-    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/destination-location' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "keyword": "bandung"}'`);
+    console.log(`- JADWAL (POST): http://localhost:${PORT}/api/transports/trips`);
+    console.log(`\n✅ LANGKAH BERIKUTNYA: Jalankan CURL untuk Trips:`);
+    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/trips' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "source_id": "132", "destination_id": "436", "travel_date": "2024-04-10"}'`);
 });
