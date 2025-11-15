@@ -353,10 +353,10 @@ app.post('/api/transports/trips', async (req, res) => {
         product_code: product_code.toUpperCase(),
         source_id: source_id,
         // Default ke CITY
-        source_type: "Banda Aceh",
+        source_type: "TERMINAL",
         destination_id: destination_id,
         // Default ke CITY
-        destination_type: "Singaraja",
+        destination_type: "TERMINAL",
         // Default total seat ke 1
         total_seat: 1,
         date: travel_date, // Mapping travel_date dari frontend ke 'date' di API
