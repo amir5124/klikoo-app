@@ -359,7 +359,7 @@ app.post('/api/transports/trips', async (req, res) => {
         destination_type: "CITY",
         // Default total seat ke 1
         total_seat: 1,
-        date: "2025-11-15 01:00:00.000000", // Mapping travel_date dari frontend ke 'date' di API
+        date: travel_date, // Mapping travel_date dari frontend ke 'date' di API
         pagination: {
             limit: 100,
             page: 1,
