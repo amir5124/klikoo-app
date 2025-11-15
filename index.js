@@ -350,7 +350,7 @@ app.post('/api/transports/trips', async (req, res) => {
     // Payload lengkap untuk Klikoo API
     // Menggunakan nilai default untuk fields opsional
     const requestBody = {
-        product_code: product_code.toUpperCase(),
+        product_code: 'BUS',
         source_id: source_id,
         // Default ke CITY
         source_type: "CITY",
