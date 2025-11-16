@@ -21,8 +21,12 @@ const BALANCE_ENDPOINT = `https://${BASE_URL}/v1/open-api/balance`;
 const ATTRACTIONS_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/attractions/detail`;
 const BOARDING_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/sources`;
 const DESTINATION_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/destinations`;
-// ✅ ENDPOINT BARU UNTUK MENCARI JADWAL PERJALANAN
 const TRIPS_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips`;
+
+// ✅ KONSTANTA ENDPOINT BARU
+const TRIP_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips-detail`;
+const BLOCK_SEAT_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/block-seat`;
+const BOOK_TICKET_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/book`;
 
 
 // Kredensial Anda
@@ -47,6 +51,8 @@ function generateDigitalSignature(method, path, token, payload, timestamp) {
         console.log(`[SIG-DEBUG] Payload untuk Hashing (GET Kosong): ""`);
     } else {
         // Gunakan JSON.stringify() untuk menghasilkan string JSON dari payload
+        // Kunci di payload HARUS diurutkan secara leksikografis, tapi Klikoo sepertinya TIDAK mewajibkan di JS.
+        // Cukup gunakan payload yang sama dengan yang dikirim ke API.
         stringToHash = JSON.stringify(payload);
         console.log(`[SIG-DEBUG] JSON.stringify Payload (Digunakan untuk Hashing): ${stringToHash}`);
     }
@@ -375,6 +381,91 @@ app.post('/api/transports/trips', async (req, res) => {
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
 
+// ----------------------------------------------------------------------------------------
+// ✅ 7. 🚌 ENDPOINT BARU: Trip Detail (POST)
+// ----------------------------------------------------------------------------------------
+app.post('/api/transports/trips-detail', async (req, res) => {
+    const apiType = 'TRIP_DETAIL';
+    const endpointPath = '/v1/open-api/transports/trips-detail';
+    const endpointURL = TRIP_DETAIL_ENDPOINT;
+
+    const { product_code, trip_id } = req.body;
+
+    if (!product_code || !trip_id) {
+        return res.status(400).json({
+            message: "**product_code** dan **trip_id** wajib diisi."
+        });
+    }
+
+    const requestBody = {
+        product_code: product_code.toUpperCase(),
+        trip_id: trip_id
+    };
+
+    console.log(`--- Memulai Proses Get ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
+// ----------------------------------------------------------------------------------------
+// ✅ 8. 💺 ENDPOINT BARU: Block Seat (POST)
+// ----------------------------------------------------------------------------------------
+app.post('/api/transports/block-seat', async (req, res) => {
+    const apiType = 'BLOCK_SEAT';
+    const endpointPath = '/v1/open-api/transports/block-seat';
+    const endpointURL = BLOCK_SEAT_ENDPOINT;
+
+    // Body dari request harus sesuai dengan format Block Ticket
+    const {
+        product_code, selling_price, partner_reference_no,
+        order_detail, departure, passengers, return: returnTrip // 'return' adalah kata kunci di JS
+    } = req.body;
+
+    if (!product_code || !selling_price || !partner_reference_no || !order_detail || !departure || !passengers) {
+        return res.status(400).json({
+            message: "product_code, selling_price, partner_reference_no, order_detail, departure, dan passengers wajib diisi untuk Block Seat."
+        });
+    }
+
+    // Payload lengkap untuk Klikoo API
+    const requestBody = {
+        product_code: product_code.toUpperCase(),
+        selling_price: selling_price,
+        partner_reference_no: partner_reference_no,
+        order_detail: order_detail,
+        departure: departure,
+        passengers: passengers,
+        // Tambahkan return/returnTrip hanya jika ada di body
+        ...(returnTrip && { return: returnTrip })
+    };
+
+    console.log(`--- Memulai Proses ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
+// ----------------------------------------------------------------------------------------
+// ✅ 9. 🎟️ ENDPOINT BARU: Book Ticket (POST)
+// ----------------------------------------------------------------------------------------
+app.post('/api/transports/book-ticket', async (req, res) => {
+    const apiType = 'BOOK_TICKET';
+    const endpointPath = '/v1/open-api/transports/book';
+    const endpointURL = BOOK_TICKET_ENDPOINT;
+
+    const { transaction_id } = req.body;
+
+    if (!transaction_id) {
+        return res.status(400).json({
+            message: "**transaction_id** wajib diisi."
+        });
+    }
+
+    const requestBody = {
+        transaction_id: transaction_id
+    };
+
+    console.log(`--- Memulai Proses ${apiType} ---`);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+});
+
 
 // --- SERVER LISTENER ---
 app.listen(PORT, () => {
@@ -386,6 +477,10 @@ app.listen(PORT, () => {
     console.log(`- Boarding (POST): http://localhost:${PORT}/api/transports/boarding-location`);
     console.log(`- Destination (POST): http://localhost:${PORT}/api/transports/destination-location`);
     console.log(`- JADWAL (POST): http://localhost:${PORT}/api/transports/trips`);
-    console.log(`\n✅ LANGKAH BERIKUTNYA: Jalankan CURL untuk Trips:`);
-    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/trips' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "source_id": "132", "destination_id": "436", "travel_date": "2024-04-10"}'`);
+    // ✅ ENDPOINT BARU
+    console.log(`- DETAIL TRIP (POST): http://localhost:${PORT}/api/transports/trips-detail`);
+    console.log(`- BLOCK SEAT (POST): http://localhost:${PORT}/api/transports/block-seat`);
+    console.log(`- BOOK TICKET (POST): http://localhost:${PORT}/api/transports/book-ticket`);
+    console.log(`\n✅ LANGKAH BERIKUTNYA: Coba panggil salah satu endpoint baru:`);
+    console.log(`curl -X POST 'http://localhost:${PORT}/api/transports/trips-detail' -H 'Content-Type: application/json' -d '{"product_code": "BUS", "trip_id": 188328}'`);
 });
