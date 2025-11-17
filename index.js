@@ -434,7 +434,7 @@ app.post('/api/transports/block-seat', async (req, res) => {
         partner_reference_no: partner_reference_no,
         order_detail: order_detail,
         departure: departure,
-        passengers: passengers,
+
         // Tambahkan return/returnTrip hanya jika ada di body
         ...(returnTrip && { return: returnTrip })
     };
