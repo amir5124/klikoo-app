@@ -417,12 +417,13 @@ app.post('/api/transports/block-seat', async (req, res) => {
     // Body dari request harus sesuai dengan format Block Ticket
     const {
         product_code, selling_price, partner_reference_no,
-        order_detail, departure, passengers, return: returnTrip // 'return' adalah kata kunci di JS
+        order_detail, departure, return: returnTrip
     } = req.body;
 
-    if (!product_code || !selling_price || !partner_reference_no || !order_detail || !departure || !passengers) {
+    if (!product_code || !selling_price || !partner_reference_no || !order_detail || !departure) {
         return res.status(400).json({
-            message: "product_code, selling_price, partner_reference_no, order_detail, departure, dan passengers wajib diisi untuk Block Seat."
+            // Sesuaikan pesan error
+            message: "product_code, selling_price, partner_reference_no, order_detail, dan departure wajib diisi untuk Block Seat."
         });
     }
 
