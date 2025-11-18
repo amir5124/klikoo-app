@@ -451,19 +451,23 @@ app.post('/api/transports/book-ticket', async (req, res) => {
     const endpointPath = '/v1/open-api/transports/book';
     const endpointURL = BOOK_TICKET_ENDPOINT;
 
-    const { transaction_id } = req.body;
+    // **PERBAIKAN:** Ambil seluruh body request dari frontend
+    const requestBody = req.body;
 
-    if (!transaction_id) {
+    // Opsional: Lakukan validasi dasar di sini (misalnya cek trip_id atau transaction_id)
+    if (!requestBody.transaction_id) {
         return res.status(400).json({
             message: "**transaction_id** wajib diisi."
         });
     }
 
-    const requestBody = {
-        transaction_id: transaction_id
-    };
+    // Pastikan requestBody mengandung semua field yang dibutuhkan API Klikoo:
+    // { transaction_id, trip_id, product_code, contact_detail, passengers, order_detail }
 
     console.log(`--- Memulai Proses ${apiType} ---`);
+    console.log("Payload lengkap dikirim ke Klikoo:", requestBody); // Logging payload lengkap
+
+    // Kirim seluruh body yang diterima dari frontend ke callSignedApi
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
 
