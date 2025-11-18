@@ -461,15 +461,16 @@ app.post('/api/transports/book-ticket', async (req, res) => {
     }
 
     // 2. **PERBAIKAN KRITIS**: Buat requestBody baru HANYA berisi transaction_id, 
-    //    sesuai dengan dokumentasi API Klikoo.
+    //    dan pastikan nilainya adalah STRING.
     const requestBody = {
-        transaction_id: transaction_id
+        // Konversi ke string menggunakan .toString() atau dengan menggabungkan dengan string kosong ("" + transaction_id)
+        transaction_id: String(transaction_id)
     };
 
     console.log(`--- Memulai Proses ${apiType} ---`);
-    console.log(`[${apiType}] Request Body Sent to Klikoo:`, requestBody); // Logging body yang benar
+    console.log(`[${apiType}] Request Body Sent to Klikoo (String Check):`, requestBody);
 
-    // 3. Kirim requestBody yang minimalis ke callSignedApi
+    // 3. Kirim requestBody yang sudah divalidasi tipenya
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
 });
 
