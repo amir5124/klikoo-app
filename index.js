@@ -8,7 +8,11 @@ const CryptoJS = require('crypto-js');
 const cors = require('cors');
 const app = express();
 const PORT = 3000;
+const mysql = require('mysql2/promise');
+const bodyParser = require('body-parser');
 app.use(cors());
+app.use(bodyParser.json());
+
 
 app.use(express.json());
 
@@ -37,6 +41,25 @@ const PRIVATE_KEY_FILE = 'privatekey.pem';
 const PRODUCT_CODE_ATTRACTION = "ATRAKSI-DANCER";
 const METHOD_POST = 'POST';
 const METHOD_GET = 'GET';
+
+const DB_CONFIG = {
+    host: '103.55.39.44',
+    user: 'linkucoi_klikoo', // Contoh: root
+    password: 'E+,,zAIh6VNI', // Contoh: password123
+    database: 'linkucoi_klikoo',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+};
+
+let pool;
+try {
+    pool = mysql.createPool(DB_CONFIG);
+    console.log("MySQL connection pool initialized successfully.");
+} catch (error) {
+    console.error("Failed to initialize MySQL pool:", error);
+    process.exit(1); // Stop the application if DB connection fails
+}
 // ------------------------------------
 
 // ------------------------------------------------------------------
@@ -559,50 +582,118 @@ app.post('/api/transports/block-seat', async (req, res) => {
 
 // ----------------------------------------------------------------------------------------
 // ✅ 9. 🎟️ ENDPOINT BARU: Book Ticket (POST)
-// ----------------------------------------------------------------------------------------
 app.post('/api/transports/book-ticket', async (req, res) => {
     const apiType = 'BOOK_TICKET';
     const endpointPath = '/v1/open-api/transports/book';
     const endpointURL = BOOK_TICKET_ENDPOINT;
 
-    const { transaction_id } = req.body;
+    // Ambil User-Agent dari body request (dikirim dari frontend sebagai user identifier/username)
+    // Berdasarkan kiriman frontend, field yang digunakan adalah 'useragen' (tanpa 't')
+    const userAgent = req.body.useragen;
+    console.log(`User Identifier (from body/useragen) received: ${userAgent}`);
 
-    // Validasi wajib
-    if (!transaction_id) {
-        return res.status(400).json({
-            response_code: "40000001",
-            response_message: "**transaction_id** wajib diisi.",
+
+    // Gunakan try-catch untuk menangani error database dan lainnya
+    try {
+        const { transaction_id } = req.body;
+
+        // Validasi wajib
+        if (!transaction_id) {
+            return res.status(400).json({
+                response_code: "40000001",
+                response_message: "**transaction_id** wajib diisi.",
+                data: null
+            });
+        }
+
+        // Build request ke Klikoo
+        const requestBody = {
+            transaction_id: String(transaction_id)
+        };
+
+        // Logging REQUEST sebelum ke Klikoo
+        console.log(`\n========== REQUEST ${apiType} ==========`);
+        console.log("Endpoint:", endpointURL + endpointPath);
+        console.log("Body Sent:", JSON.stringify(requestBody, null, 2));
+        console.log("========================================\n");
+
+        // Panggil Klikoo API
+        callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, async (apiResponse) => {
+
+            // Logging RESPONSE dari Klikoo
+            console.log(`\n********** RESPONSE ${apiType} **********`);
+            console.log("Raw Response:");
+            console.log(JSON.stringify(apiResponse, null, 2));
+            console.log("****************************************\n");
+
+            const { response_code, response_message, data } = apiResponse;
+
+            // ==============================================================
+            // LOGIKA PENYIMPANAN KE DATABASE (Jika API berhasil)
+            // ==============================================================
+            if (response_code === "201052001" && data?.status === "SUCCESS") {
+                console.log("API Success. Preparing to save to DB...");
+
+                const {
+                    transaction_id: klikoo_transaction_id,
+                    status,
+                    booking_codes
+                } = data;
+
+                // Memperbarui SQL query untuk menyertakan user_agent
+                const sql = `
+                    INSERT INTO ticket_bookings 
+                    (transaction_id, api_response_code, api_response_message, status, departure_code, return_code, user_agent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE
+                    api_response_code = VALUES(api_response_code),
+                    api_response_message = VALUES(api_response_message),
+                    status = VALUES(status),
+                    departure_code = VALUES(departure_code),
+                    return_code = VALUES(return_code),
+                    user_agent = VALUES(user_agent); 
+                `;
+
+                // Memperbarui values array untuk menyertakan userAgent (yang diambil dari req.body.useragen)
+                const values = [
+                    klikoo_transaction_id,
+                    response_code,
+                    response_message,
+                    status,
+                    booking_codes?.departure || null,
+                    booking_codes?.return || null,
+                    userAgent || null // Menggunakan userAgent dari req.body.useragen
+                ];
+
+                try {
+                    // Eksekusi query INSERT/UPDATE
+                    const [result] = await pool.execute(sql, values);
+                    console.log(`[DB SUCCESS] Booking saved/updated. Insert ID: ${result.insertId || 'N/A'}, Affected Rows: ${result.affectedRows}`);
+                } catch (dbError) {
+                    console.error("[DB ERROR] Failed to save booking to database:", dbError.message);
+                    // Lanjutkan untuk mengirim respons ke klien meskipun DB error
+                }
+            }
+            // ==============================================================
+
+            // Kirim respons akhir ke klien
+            return res.status(200).json({
+                response_code: response_code || "200",
+                response_message: response_message || "Success",
+                data: data || null
+            });
+        });
+
+    } catch (error) {
+        // Menangani error tak terduga (misalnya JSON parsing error atau pool error)
+        console.error("Internal Server Error in route:", error);
+        return res.status(500).json({
+            response_code: "50000000",
+            response_message: "Internal Server Error",
             data: null
         });
     }
-
-    // Build request ke Klikoo
-    const requestBody = {
-        transaction_id: String(transaction_id)
-    };
-
-    // Logging REQUEST sebelum ke Klikoo
-    console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
-    console.log("Body Sent:", JSON.stringify(requestBody, null, 2));
-    console.log("========================================\n");
-
-    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, (apiResponse) => {
-
-        // Logging RESPONSE dari Klikoo
-        console.log(`\n********** RESPONSE ${apiType} **********`);
-        console.log("Raw Response:");
-        console.log(JSON.stringify(apiResponse, null, 2));
-        console.log("****************************************\n");
-
-        return res.status(200).json({
-            response_code: apiResponse?.response_code || "200",
-            response_message: apiResponse?.response_message || "Success",
-            data: apiResponse?.data || null
-        });
-    });
 });
-
 
 
 // --- SERVER LISTENER ---
