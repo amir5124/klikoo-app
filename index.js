@@ -588,7 +588,6 @@ app.post('/api/transports/book-ticket', async (req, res) => {
     const endpointURL = BOOK_TICKET_ENDPOINT;
 
     // Ambil User-Agent dari body request (dikirim dari frontend sebagai user identifier/username)
-    // Berdasarkan kiriman frontend, field yang digunakan adalah 'useragen' (tanpa 't')
     const userAgent = req.body.useragen;
     console.log(`User Identifier (from body/useragen) received: ${userAgent}`);
 
@@ -631,6 +630,7 @@ app.post('/api/transports/book-ticket', async (req, res) => {
             // ==============================================================
             // LOGIKA PENYIMPANAN KE DATABASE (Jika API berhasil)
             // ==============================================================
+            // Cek kondisi sukses dari API (kode 201052001 dan status SUCCESS)
             if (response_code === "201052001" && data?.status === "SUCCESS") {
                 console.log("API Success. Preparing to save to DB...");
 
@@ -640,7 +640,7 @@ app.post('/api/transports/book-ticket', async (req, res) => {
                     booking_codes
                 } = data;
 
-                // Memperbarui SQL query untuk menyertakan user_agent
+                // Query SQL untuk menyimpan data booking, termasuk user_agent
                 const sql = `
                     INSERT INTO ticket_bookings 
                     (transaction_id, api_response_code, api_response_message, status, departure_code, return_code, user_agent)
@@ -654,7 +654,7 @@ app.post('/api/transports/book-ticket', async (req, res) => {
                     user_agent = VALUES(user_agent); 
                 `;
 
-                // Memperbarui values array untuk menyertakan userAgent (yang diambil dari req.body.useragen)
+                // Array nilai yang akan di-bind ke query SQL
                 const values = [
                     klikoo_transaction_id,
                     response_code,
@@ -676,7 +676,7 @@ app.post('/api/transports/book-ticket', async (req, res) => {
             }
             // ==============================================================
 
-            // Kirim respons akhir ke klien
+            // Kirim respons akhir ke klien (dari API eksternal)
             return res.status(200).json({
                 response_code: response_code || "200",
                 response_message: response_message || "Success",
@@ -690,6 +690,63 @@ app.post('/api/transports/book-ticket', async (req, res) => {
         return res.status(500).json({
             response_code: "50000000",
             response_message: "Internal Server Error",
+            data: null
+        });
+    }
+});
+
+
+// ROUTE 4.2: GET HISTORY by User Agent (GET) - ROUTE BARU
+app.get('/api/transports/history/:useragen', async (req, res) => {
+    const userAgent = req.params.useragen;
+    console.log(`\n========== REQUEST HISTORY by User Agent ==========`);
+    console.log(`Fetching history for user: ${userAgent}`);
+
+    if (!userAgent) {
+        return res.status(400).json({
+            response_code: "40000002",
+            response_message: "**useragen** wajib diisi di path URL.",
+            data: []
+        });
+    }
+
+    // Query untuk mengambil semua kolom data booking berdasarkan user_agent
+    const sql = `
+        SELECT 
+            id, 
+            transaction_id, 
+            api_response_code, 
+            api_response_message, 
+            status, 
+            departure_code, 
+            return_code, 
+            user_agent, 
+            created_at 
+        FROM 
+            ticket_bookings 
+        WHERE 
+            user_agent = ?
+        ORDER BY 
+            created_at DESC;
+    `;
+
+    try {
+        const [rows] = await pool.execute(sql, [userAgent]);
+
+        console.log(`[DB SUCCESS] Found ${rows.length} records for user ${userAgent}`);
+
+        // Mengirim data riwayat dalam format JSON
+        return res.status(200).json({
+            response_code: "20000000",
+            response_message: "History berhasil diambil.",
+            data: rows // rows adalah array of objects dari hasil query
+        });
+
+    } catch (error) {
+        console.error("Internal Server Error fetching history:", error);
+        return res.status(500).json({
+            response_code: "50000000",
+            response_message: "Gagal mengambil data history dari database.",
             data: null
         });
     }
