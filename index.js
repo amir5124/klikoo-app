@@ -34,8 +34,8 @@ const BOOK_TICKET_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/book`;
 
 
 // Kredensial Anda
-const CLIENT_ID = '8670d916-9d10-45b9-a091-82b9dedd9b53';
-const CLIENT_SECRET = 'vylmiqtm91jq74ct537pdw5vqq05retj';
+const CLIENT_ID = 'f090bd38-6e1f-4675-b4e9-a37e5965f527';
+const CLIENT_SECRET = 't0oeiqex8qh7z1urbyvyjng7mri5t1bw';
 const PRIVATE_KEY_FILE = 'privatekey.pem';
 
 const PRODUCT_CODE_ATTRACTION = "ATRAKSI-DANCER";
