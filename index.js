@@ -17,7 +17,7 @@ app.use(bodyParser.json());
 app.use(express.json());
 
 // --- KONSTANTA UTAMA KLIKOO API ---
-const BASE_URL = 'pvpapi.stage.pvg.im/klikoo-b2b';
+const BASE_URL = 'pvpapi.klikoo.id/klikoo-b2b';
 
 const AUTH_SIGNATURE_ENDPOINT = `https://${BASE_URL}/v1/open-api/auth-signature`;
 const ACCESS_TOKEN_ENDPOINT = `https://${BASE_URL}/v1/open-api/access-token`;
