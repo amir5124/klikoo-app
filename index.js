@@ -40,22 +40,6 @@ const CLIENT_SECRET = 't0oeiqex8qh7z1urbyvyjng7mri5t1bw';
 // FILE PRIVATE KEY
 const PRIVATE_KEY_FILE = 'privatekey.pem';
 
-// === BACA FILE PRIVATE KEY ===
-let privateKeyBase64;
-try {
-    const privateKeyContent = fs.readFileSync(
-        path.join(__dirname, PRIVATE_KEY_FILE),
-        'utf-8'
-    );
-
-    privateKeyBase64 = Buffer.from(privateKeyContent)
-        .toString('base64')
-        .replace(/\n/g, '');
-
-    console.log("Private Key berhasil dibaca dan dikonversi ke Base64.");
-} catch (err) {
-    console.error(`❌ Gagal membaca Private Key (${PRIVATE_KEY_FILE}) :`, err.message);
-}
 
 
 const PRODUCT_CODE_ATTRACTION = "ATRAKSI-DANCER";
@@ -114,85 +98,119 @@ function generateDigitalSignature(method, path, token, payload, timestamp) {
 // ----------------------------------------------------------------------------------------
 async function getAuthSignature() {
     let privateKeyBase64;
+
+    console.log("====================================");
+    console.log("[DEBUG] Mulai proses getAuthSignature()");
+    console.log(`[DEBUG] Lokasi Private Key: ${path.join(__dirname, PRIVATE_KEY_FILE)}`);
+
     try {
         const privateKeyContent = fs.readFileSync(path.join(__dirname, PRIVATE_KEY_FILE), 'utf-8');
         privateKeyBase64 = Buffer.from(privateKeyContent).toString('base64').replace(/\n/g, '');
+
+        console.log("[DEBUG] Private key berhasil dibaca.");
+        console.log(`[DEBUG] PrivateKey (base64) preview: ${privateKeyBase64.substring(0, 20)}...${privateKeyBase64.slice(-20)}`);
     } catch (err) {
+        console.error("[ERROR] Gagal membaca private key file!");
+        console.error(err);
         throw new Error(`Gagal membaca Private Key: ${err.message}. Pastikan file ${PRIVATE_KEY_FILE} ada.`);
     }
 
     const timestamp = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
     const requestBody = { client_id: CLIENT_ID, timestamp: timestamp, private_key: privateKeyBase64 };
+
+    console.log("[DEBUG] Request ke AUTH_SIGNATURE_ENDPOINT:");
+    console.log(`URL: ${AUTH_SIGNATURE_ENDPOINT}`);
+    console.log("Request Body:", requestBody);
+
     const options = {
-        method: 'POST', url: AUTH_SIGNATURE_ENDPOINT,
-        headers: { 'Content-Type': 'application/json', 'Open-Api-Timestamp': timestamp },
+        method: 'POST',
+        url: AUTH_SIGNATURE_ENDPOINT,
+        headers: {
+            'Content-Type': 'application/json',
+            'Open-Api-Timestamp': timestamp
+        },
         data: requestBody
     };
 
     try {
         const response = await axios(options);
+        console.log("[DEBUG] Response Auth Signature:", response.data);
+
         const signature = response.data.signature || response.data.auth_signature || response.data.data?.signature;
         if (!signature) {
             console.error("[AUTH SIG] Respon sukses, tapi 'signature' tidak ditemukan:", response.data);
             throw new Error("Properti 'signature' tidak ditemukan di response API Auth Signature.");
         }
-        console.log(`[AUTH SIG] Auth Signature berhasil didapat.`);
+
+        console.log(`[AUTH SIG] Auth Signature berhasil didapat. Signature preview: ${signature.substring(0, 10)}...`);
         return { signature: signature, timestamp: timestamp };
     } catch (error) {
+        console.error("----- ERROR AUTH SIGNATURE -----");
         if (error.response) {
-            const errMsg = error.response.data.response_message || error.response.statusText;
-            console.error(`[AUTH SIG] GAGAL DENGAN STATUS ${error.response.status}:`, error.response.data);
-            throw new Error(`Auth Signature Gagal (${error.response.status}): ${errMsg}`);
+            console.error("[AUTH ERROR RESPONSE]:", error.response.data);
+            throw new Error(`Auth Signature Gagal (${error.response.status}): ${error.response.data.response_message || error.response.statusText}`);
         }
+        console.error("[AUTH ERROR STACK]:", error);
         throw new Error(`Gagal API Auth Signature: ${error.message}`);
     }
 }
 
 async function getAccessToken() {
+    console.log("====================================");
+    console.log("[DEBUG] Mulai proses getAccessToken()");
+
     let authData;
     try {
         authData = await getAuthSignature();
+        console.log(`[DEBUG] Signature dan Timestamp diterima: ${authData.signature.substring(0, 10)}..., ${authData.timestamp}`);
     } catch (error) {
-        throw new Error(`Kesalahan pra-autentikasi (Auth Signature): ${error.message}`);
+        console.error("[ACCESS TOKEN] Error pada pemanggilan getAuthSignature():", error.message);
+        throw new Error(`Kesalahan pra-autentikasi: ${error.message}`);
     }
 
     const cleanSecret = CLIENT_SECRET.trim();
-
     const requestBody = {
         grant_type: "client_credentials",
         additional_info: { client_id: CLIENT_ID, client_secret: cleanSecret }
     };
 
-    const headers = {
-        'Content-Type': 'application/json',
-        'Open-Api-Timestamp': authData.timestamp,
-        'Open-Api-Signature': authData.signature
-    };
+    console.log("[DEBUG] Request ke ACCESS_TOKEN_ENDPOINT:");
+    console.log("URL:", ACCESS_TOKEN_ENDPOINT);
+    console.log("Request Body:", requestBody);
 
     const options = {
-        method: 'POST', url: ACCESS_TOKEN_ENDPOINT,
-        headers: headers, data: requestBody
+        method: 'POST',
+        url: ACCESS_TOKEN_ENDPOINT,
+        headers: {
+            'Content-Type': 'application/json',
+            'Open-Api-Timestamp': authData.timestamp,
+            'Open-Api-Signature': authData.signature
+        },
+        data: requestBody
     };
 
     try {
-        console.log("[TOKEN] Memanggil API Access Token...");
         const response = await axios(options);
+        console.log("[DEBUG] Response Access Token:", response.data);
+
         const accessToken = response.data.access_token || response.data.data?.access_token;
         if (!accessToken) {
-            console.error("[TOKEN] GAGAL: 'access_token' tidak ditemukan. Respons Penuh:", response.data);
+            console.error("[TOKEN] 'access_token' tidak ditemukan. Respons lengkap:", response.data);
             throw new Error("Properti 'access_token' tidak ditemukan di response API Access Token.");
         }
-        console.log("[TOKEN] Access Token berhasil diterima.");
+        console.log("[TOKEN] Access Token diterima.");
         return accessToken;
     } catch (error) {
+        console.error("----- ERROR ACCESS TOKEN -----");
         if (error.response) {
-            const errMsg = error.response.data.response_message || error.response.statusText || 'Kesalahan dari API Token';
-            console.error(`[TOKEN] GAGAL DENGAN STATUS ${error.response.status}. Pesan API: ${errMsg}`);
-            throw new Error(`Error saat memanggil API Access Token (${error.response.status}): ${errMsg}`);
+            console.error("[TOKEN ERROR RESPONSE]:", error.response.data);
+            throw new Error(`Error Token (${error.response.status}): ${error.response.data.response_message || error.response.statusText}`);
         }
+        console.error("[TOKEN ERROR STACK]:", error);
         throw new Error(`Gagal API Access Token: ${error.message}`);
     }
 }
+
 
 // ----------------------------------------------------------------------------------------
 // --- FUNGSI UTILITY: HANDLER UMUM UNTUK API YANG MEMBUTUHKAN DIGITAL SIGNATURE ---
