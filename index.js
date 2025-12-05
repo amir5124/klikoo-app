@@ -17,20 +17,25 @@ app.use(bodyParser.json());
 app.use(express.json());
 
 // --- KONSTANTA UTAMA KLIKOO API ---
-const BASE_URL = 'pvpapi.klikoo.id/klikoo-b2b';
+// Hanya domain tanpa prefix tambahan
+const BASE_URL = 'pvpapi.klikoo.id';
 
-const AUTH_SIGNATURE_ENDPOINT = `https://${BASE_URL}/v1/open-api/auth-signature`;
-const ACCESS_TOKEN_ENDPOINT = `https://${BASE_URL}/v1/open-api/access-token`;
-const BALANCE_ENDPOINT = `https://${BASE_URL}/v1/open-api/balance`;
-const ATTRACTIONS_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/attractions/detail`;
-const BOARDING_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/sources`;
-const DESTINATION_LOCATION_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/destinations`;
-const TRIPS_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips`;
+// Helper untuk membangun endpoint otomatis
+const API = (path) => `https://${BASE_URL}/klikoo-b2b${path}`;
 
-// ✅ KONSTANTA ENDPOINT BARU
-const TRIP_DETAIL_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/trips-detail`;
-const BLOCK_SEAT_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/block-seat`;
-const BOOK_TICKET_ENDPOINT = `https://${BASE_URL}/v1/open-api/transports/book`;
+// ==========================
+// ENDPOINT KONSTANTA
+// ==========================
+const AUTH_SIGNATURE_ENDPOINT = API('/v1/open-api/auth-signature');
+const ACCESS_TOKEN_ENDPOINT = API('/v1/open-api/access-token');
+const BALANCE_ENDPOINT = API('/v1/open-api/balance');
+const ATTRACTIONS_DETAIL_ENDPOINT = API('/v1/open-api/attractions/detail');
+const BOARDING_LOCATION_ENDPOINT = API('/v1/open-api/transports/sources');
+const DESTINATION_LOCATION_ENDPOINT = API('/v1/open-api/transports/destinations');
+const TRIPS_ENDPOINT = API('/v1/open-api/transports/trips');
+const TRIP_DETAIL_ENDPOINT = API('/v1/open-api/transports/trips-detail');
+const BLOCK_SEAT_ENDPOINT = API('/v1/open-api/transports/block-seat');
+const BOOK_TICKET_ENDPOINT = API('/v1/open-api/transports/book');
 
 
 // Kredensial Anda
