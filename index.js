@@ -10,6 +10,7 @@ const app = express();
 const PORT = 3000;
 const mysql = require('mysql2/promise');
 const bodyParser = require('body-parser');
+
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.json());
@@ -32,10 +33,30 @@ const TRIP_DETAIL_ENDPOINT = API('/v1/open-api/transports/trips-detail');
 const BLOCK_SEAT_ENDPOINT = API('/v1/open-api/transports/block-seat');
 const BOOK_TICKET_ENDPOINT = API('/v1/open-api/transports/book');
 
-// Kredensial Anda
+// KREDENSIAL
 const CLIENT_ID = 'f090bd38-6e1f-4675-b4e9-a37e5965f527';
 const CLIENT_SECRET = 't0oeiqex8qh7z1urbyvyjng7mri5t1bw';
+
+// FILE PRIVATE KEY
 const PRIVATE_KEY_FILE = 'privatekey.pem';
+
+// === BACA FILE PRIVATE KEY ===
+let privateKeyBase64;
+try {
+    const privateKeyContent = fs.readFileSync(
+        path.join(__dirname, PRIVATE_KEY_FILE),
+        'utf-8'
+    );
+
+    privateKeyBase64 = Buffer.from(privateKeyContent)
+        .toString('base64')
+        .replace(/\n/g, '');
+
+    console.log("Private Key berhasil dibaca dan dikonversi ke Base64.");
+} catch (err) {
+    console.error(`❌ Gagal membaca Private Key (${PRIVATE_KEY_FILE}) :`, err.message);
+}
+
 
 const PRODUCT_CODE_ATTRACTION = "ATRAKSI-DANCER";
 const METHOD_POST = 'POST';
