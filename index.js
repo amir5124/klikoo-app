@@ -12,16 +12,11 @@ const mysql = require('mysql2/promise');
 const bodyParser = require('body-parser');
 app.use(cors());
 app.use(bodyParser.json());
-
-
 app.use(express.json());
 
 // --- KONSTANTA UTAMA KLIKOO API ---
-// Hanya domain tanpa prefix tambahan
 const BASE_URL = 'pvpapi.klikoo.id';
-
-// Helper untuk membangun endpoint otomatis
-const API = (path) => `https://${BASE_URL}/klikoo-b2b${path}`;
+const API = (p) => `https://${BASE_URL}/klikoo-b2b${p}`;
 
 // ==========================
 // ENDPOINT KONSTANTA
@@ -37,7 +32,6 @@ const TRIP_DETAIL_ENDPOINT = API('/v1/open-api/transports/trips-detail');
 const BLOCK_SEAT_ENDPOINT = API('/v1/open-api/transports/block-seat');
 const BOOK_TICKET_ENDPOINT = API('/v1/open-api/transports/book');
 
-
 // Kredensial Anda
 const CLIENT_ID = 'f090bd38-6e1f-4675-b4e9-a37e5965f527';
 const CLIENT_SECRET = 't0oeiqex8qh7z1urbyvyjng7mri5t1bw';
@@ -49,8 +43,8 @@ const METHOD_GET = 'GET';
 
 const DB_CONFIG = {
     host: '103.55.39.44',
-    user: 'linkucoi_klikoo', // Contoh: root
-    password: 'E+,,zAIh6VNI', // Contoh: password123
+    user: 'linkucoi_klikoo',
+    password: 'E+,,zAIh6VNI',
     database: 'linkucoi_klikoo',
     waitForConnections: true,
     connectionLimit: 10,
@@ -63,38 +57,29 @@ try {
     console.log("MySQL connection pool initialized successfully.");
 } catch (error) {
     console.error("Failed to initialize MySQL pool:", error);
-    process.exit(1); // Stop the application if DB connection fails
+    process.exit(1);
 }
-// ------------------------------------
 
 // ------------------------------------------------------------------
 // --- FUNGSI UTILITY: MENGHITUNG DIGITAL SIGNATURE (HMAC-SHA512) ---
 // ------------------------------------------------------------------
 function generateDigitalSignature(method, path, token, payload, timestamp) {
-
     let stringToHash;
 
-    if (method === METHOD_GET && Object.keys(payload).length === 0) {
+    if (method === METHOD_GET && Object.keys(payload || {}).length === 0) {
         stringToHash = "";
         console.log(`[SIG-DEBUG] Payload untuk Hashing (GET Kosong): ""`);
     } else {
-        // Gunakan JSON.stringify() untuk menghasilkan string JSON dari payload
-        // Kunci di payload HARUS diurutkan secara leksikografis, tapi Klikoo sepertinya TIDAK mewajibkan di JS.
-        // Cukup gunakan payload yang sama dengan yang dikirim ke API.
-        stringToHash = JSON.stringify(payload);
+        stringToHash = JSON.stringify(payload || {});
         console.log(`[SIG-DEBUG] JSON.stringify Payload (Digunakan untuk Hashing): ${stringToHash}`);
     }
 
-    // 2. hashed_payload = hexEncode(sha256(stringToHash))
     const hashedPayload = CryptoJS.SHA256(stringToHash).toString(CryptoJS.enc.Hex);
-
-    // 3. Bentuk string_to_sign
     const stringToSign = `${method}:${path}:${token}:${hashedPayload}:${timestamp}`;
 
     console.log(`[SIG-DIGITAL] String To Sign: ${stringToSign}`);
     console.log(`[SIG-DIGITAL] Hashed Payload: ${hashedPayload}`);
 
-    // 4. Hitung HMAC-SHA512
     const cleanSecret = CLIENT_SECRET.trim();
     const hmac = crypto.createHmac('sha512', cleanSecret, 'utf8');
     hmac.update(stringToSign);
@@ -106,7 +91,6 @@ function generateDigitalSignature(method, path, token, payload, timestamp) {
 // ----------------------------------------------------------------------------------------
 // --- FUNGSI UTILITY: MENDAPATKAN AUTH SIGNATURE (LANGKAH 1 & 2) ---
 // ----------------------------------------------------------------------------------------
-
 async function getAuthSignature() {
     let privateKeyBase64;
     try {
@@ -116,9 +100,7 @@ async function getAuthSignature() {
         throw new Error(`Gagal membaca Private Key: ${err.message}. Pastikan file ${PRIVATE_KEY_FILE} ada.`);
     }
 
-    // Timestamp Langkah 1 & 2 tetap menggunakan format panjang (.000)
     const timestamp = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
-
     const requestBody = { client_id: CLIENT_ID, timestamp: timestamp, private_key: privateKeyBase64 };
     const options = {
         method: 'POST', url: AUTH_SIGNATURE_ENDPOINT,
@@ -135,7 +117,6 @@ async function getAuthSignature() {
         }
         console.log(`[AUTH SIG] Auth Signature berhasil didapat.`);
         return { signature: signature, timestamp: timestamp };
-
     } catch (error) {
         if (error.response) {
             const errMsg = error.response.data.response_message || error.response.statusText;
@@ -175,13 +156,11 @@ async function getAccessToken() {
     try {
         console.log("[TOKEN] Memanggil API Access Token...");
         const response = await axios(options);
-
         const accessToken = response.data.access_token || response.data.data?.access_token;
         if (!accessToken) {
             console.error("[TOKEN] GAGAL: 'access_token' tidak ditemukan. Respons Penuh:", response.data);
             throw new Error("Properti 'access_token' tidak ditemukan di response API Access Token.");
         }
-
         console.log("[TOKEN] Access Token berhasil diterima.");
         return accessToken;
     } catch (error) {
@@ -193,7 +172,6 @@ async function getAccessToken() {
         throw new Error(`Gagal API Access Token: ${error.message}`);
     }
 }
-
 
 // ----------------------------------------------------------------------------------------
 // --- FUNGSI UTILITY: HANDLER UMUM UNTUK API YANG MEMBUTUHKAN DIGITAL SIGNATURE ---
@@ -207,16 +185,14 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
             response_code: "500",
             response_message: `Gagal mendapatkan ${apiType} karena masalah Access Token.`,
             data: null,
-            error
+            error: error.message || error
         });
     }
 
     const token = accessToken;
-
     const timestampHeader = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
     const timestampSig = timestampHeader;
-
-    const signaturePayload = (method === METHOD_GET) ? {} : requestBody;
+    const signaturePayload = (method === METHOD_GET) ? {} : requestBody || {};
 
     let digitalSignature;
     try {
@@ -227,7 +203,7 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
             response_code: "500",
             response_message: "Gagal menghitung Digital Signature.",
             data: null,
-            error
+            error: error.message || error
         });
     }
 
@@ -251,18 +227,13 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
 
     try {
         const response = await axios(options);
-
         console.log(`[${apiType}] Data berhasil diterima. Status: ${response.status}`);
-
         return callback(response.data);
-
     } catch (error) {
-
         if (error.response) {
             console.error(`[${apiType}] ERROR ${error.response.status}:`, error.response.data);
             return callback(error.response.data);
         }
-
         console.error(`[${apiType}] ERROR INTERNAL:`, error.message);
         return callback({
             response_code: "500",
@@ -272,7 +243,6 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
         });
     }
 }
-
 
 // ----------------------------------------------------------------------------------------
 // --- ENDPOINT DEFINITIONS ---
@@ -285,8 +255,8 @@ app.get('/api/get-access-token', async (req, res) => {
         const accessToken = await getAccessToken();
         res.status(200).json({ access_token: accessToken });
     } catch (error) {
-        console.error("Error di /api/get-access-token:", error.message);
-        res.status(500).json({ message: error.message });
+        console.error("Error di /api/get-access-token:", error.message || error);
+        res.status(500).json({ message: error.message || error });
     }
 });
 
@@ -295,13 +265,18 @@ app.get('/api/client-balance', async (req, res) => {
     const apiType = 'CLIENT_BALANCE';
     const endpointPath = '/v1/open-api/balance';
     const endpointURL = BALANCE_ENDPOINT;
-
     const requestBody = {};
 
     console.log(`--- Memulai Proses Get ${apiType} ---`);
-    callSignedApi(apiType, endpointURL, endpointPath, METHOD_GET, requestBody, res);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_GET, requestBody, (apiResponse) => {
+        return res.status(apiResponse?.response_code && apiResponse.response_code.startsWith('2') ? 200 : 200).json({
+            response_code: apiResponse?.response_code || "200",
+            response_message: apiResponse?.response_message || "Success",
+            data: apiResponse?.data || null,
+            raw: apiResponse
+        });
+    });
 });
-
 
 // 3. ENDPOINT: Mendapatkan Detail Atraksi (POST)
 app.post('/api/get-attraction-detail', async (req, res) => {
@@ -311,7 +286,14 @@ app.post('/api/get-attraction-detail', async (req, res) => {
     const requestBody = { product_code: PRODUCT_CODE_ATTRACTION };
 
     console.log(`--- Memulai Proses Get Product ${apiType} ---`);
-    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, res);
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, (apiResponse) => {
+        return res.status(200).json({
+            response_code: apiResponse?.response_code || "200",
+            response_message: apiResponse?.response_message || "Success",
+            data: apiResponse?.data || null,
+            raw: apiResponse
+        });
+    });
 });
 
 // 4. 🚉 ENDPOINT: Boarding Location (POST)
@@ -319,7 +301,6 @@ app.post('/api/transports/boarding-location', async (req, res) => {
     const apiType = 'BOARDING_LOCATION';
     const endpointPath = '/v1/open-api/transports/sources';
     const endpointURL = BOARDING_LOCATION_ENDPOINT;
-
     const { product_code, keyword } = req.body;
 
     if (!product_code) {
@@ -330,9 +311,8 @@ app.post('/api/transports/boarding-location', async (req, res) => {
         });
     }
 
-    // LOG Request
     console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
+    console.log("Endpoint:", endpointURL);
     console.log("Body:", { product_code, keyword });
     console.log("========================================\n");
 
@@ -343,30 +323,26 @@ app.post('/api/transports/boarding-location', async (req, res) => {
         METHOD_POST,
         { product_code: product_code.toUpperCase(), keyword },
         (apiResponse) => {
-
-            // LOG Response
             console.log(`\n********** RESPONSE ${apiType} **********`);
             console.log("Raw Response:");
             console.log(JSON.stringify(apiResponse, null, 2));
             console.log("****************************************\n");
 
-            // Send formatted response
             return res.status(200).json({
                 response_code: apiResponse?.response_code || "200",
                 response_message: apiResponse?.response_message || "Success",
-                data: apiResponse?.data || null
+                data: apiResponse?.data || null,
+                raw: apiResponse
             });
         }
     );
 });
-
 
 // 5. 📍 ENDPOINT: Destination Location (POST)
 app.post('/api/transports/destination-location', async (req, res) => {
     const apiType = 'DESTINATION_LOCATION';
     const endpointPath = '/v1/open-api/transports/destinations';
     const endpointURL = DESTINATION_LOCATION_ENDPOINT;
-
     const { product_code, keyword } = req.body;
 
     if (!product_code) {
@@ -377,15 +353,13 @@ app.post('/api/transports/destination-location', async (req, res) => {
         });
     }
 
-    // buat request body dengan urutan yang benar
     const requestBody = {
         product_code: product_code.toUpperCase(),
-        keyword: keyword || ""   // aman walaupun kosong
+        keyword: keyword || ""
     };
 
-    // LOG Request
     console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
+    console.log("Endpoint:", endpointURL);
     console.log("Request Body:", JSON.stringify(requestBody, null, 2));
     console.log("========================================\n");
 
@@ -396,8 +370,6 @@ app.post('/api/transports/destination-location', async (req, res) => {
         METHOD_POST,
         requestBody,
         (apiResponse) => {
-
-            // LOG Response
             console.log(`\n********** RESPONSE ${apiType} **********`);
             console.log("Raw Response:");
             console.log(JSON.stringify(apiResponse, null, 2));
@@ -406,20 +378,18 @@ app.post('/api/transports/destination-location', async (req, res) => {
             return res.status(200).json({
                 response_code: apiResponse?.response_code || "200",
                 response_message: apiResponse?.response_message || "Success",
-                data: apiResponse?.data || null
+                data: apiResponse?.data || null,
+                raw: apiResponse
             });
         }
     );
 });
-
 
 // 6. 🚌 ENDPOINT: Transport Trips / Search Schedule (POST)
 app.post('/api/transports/trips', async (req, res) => {
     const apiType = 'TRANSPORT_TRIPS';
     const endpointPath = '/v1/open-api/transports/trips';
     const endpointURL = TRIPS_ENDPOINT;
-
-    // Data wajib dari frontend
     const { product_code, source_id, destination_id, travel_date } = req.body;
 
     if (!product_code || !source_id || !destination_id || !travel_date) {
@@ -428,7 +398,6 @@ app.post('/api/transports/trips', async (req, res) => {
         });
     }
 
-    // Payload final untuk API Klikoo
     const requestBody = {
         product_code: product_code.toUpperCase(),
         source_id: source_id,
@@ -448,9 +417,8 @@ app.post('/api/transports/trips', async (req, res) => {
         }
     };
 
-    // ==== LOG REQUEST ====
     console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
+    console.log("Endpoint:", endpointURL);
     console.log("Request Body:");
     console.log(JSON.stringify(requestBody, null, 2));
     console.log("========================================\n");
@@ -462,8 +430,6 @@ app.post('/api/transports/trips', async (req, res) => {
         METHOD_POST,
         requestBody,
         (apiResponse) => {
-
-            // ==== LOG RESPONSE ====
             console.log(`\n********** RESPONSE ${apiType} **********`);
             console.log("Raw Response:");
             console.log(JSON.stringify(apiResponse, null, 2));
@@ -472,20 +438,18 @@ app.post('/api/transports/trips', async (req, res) => {
             return res.status(200).json({
                 response_code: apiResponse?.response_code || "200",
                 response_message: apiResponse?.response_message || "Success",
-                data: apiResponse?.data || null
+                data: apiResponse?.data || null,
+                raw: apiResponse
             });
         }
     );
 });
 
-// ----------------------------------------------------------------------------------------
-// ✅ 7. 🚌 ENDPOINT BARU: Trip Detail (POST)
-// ----------------------------------------------------------------------------------------
+// 7. 🚌 ENDPOINT: Trip Detail (POST)
 app.post('/api/transports/trips-detail', async (req, res) => {
     const apiType = 'TRIP_DETAIL';
     const endpointPath = '/v1/open-api/transports/trips-detail';
     const endpointURL = TRIP_DETAIL_ENDPOINT;
-
     const { product_code, trip_id } = req.body;
 
     if (!product_code || !trip_id) {
@@ -501,9 +465,8 @@ app.post('/api/transports/trips-detail', async (req, res) => {
         trip_id
     };
 
-    // ==== LOG Request ====
     console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
+    console.log("Endpoint:", endpointURL);
     console.log("Body:", requestBody);
     console.log("========================================\n");
 
@@ -514,8 +477,6 @@ app.post('/api/transports/trips-detail', async (req, res) => {
         METHOD_POST,
         requestBody,
         (apiResponse) => {
-
-            // ==== LOG Response ====
             console.log(`\n********** RESPONSE ${apiType} **********`);
             console.log("Raw Response:");
             console.log(JSON.stringify(apiResponse, null, 2));
@@ -524,27 +485,23 @@ app.post('/api/transports/trips-detail', async (req, res) => {
             return res.status(200).json({
                 response_code: apiResponse?.response_code || "200",
                 response_message: apiResponse?.response_message || "Success",
-                data: apiResponse?.data || null
+                data: apiResponse?.data || null,
+                raw: apiResponse
             });
         }
     );
 });
 
-
-// ----------------------------------------------------------------------------------------
-// ✅ 8. 💺 ENDPOINT BARU: Block Seat (POST)
-// ----------------------------------------------------------------------------------------
+// 8. 💺 ENDPOINT: Block Seat (POST)
 app.post('/api/transports/block-seat', async (req, res) => {
     const apiType = 'BLOCK_SEAT';
     const endpointPath = '/v1/open-api/transports/block-seat';
     const endpointURL = BLOCK_SEAT_ENDPOINT;
-
     const {
         product_code, selling_price, partner_reference_no,
         order_detail, departure, return: returnTrip
     } = req.body;
 
-    // Validasi field wajib
     if (!product_code || !selling_price || !partner_reference_no || !order_detail || !departure) {
         return res.status(400).json({
             response_code: "40000001",
@@ -553,7 +510,6 @@ app.post('/api/transports/block-seat', async (req, res) => {
         });
     }
 
-    // Payload request
     const requestBody = {
         product_code: product_code.toUpperCase(),
         selling_price,
@@ -563,145 +519,121 @@ app.post('/api/transports/block-seat', async (req, res) => {
         ...(returnTrip && { return: returnTrip })
     };
 
-    // Logging REQUEST
     console.log(`\n========== REQUEST ${apiType} ==========`);
-    console.log("Endpoint:", endpointURL + endpointPath);
+    console.log("Endpoint:", endpointURL);
     console.log("Body Sent:", JSON.stringify(requestBody, null, 2));
     console.log("========================================\n");
 
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, (apiResponse) => {
-
-        // Logging RESPONSE
         console.log(`\n********** RESPONSE ${apiType} **********`);
-        console.log("Raw Response:");
         console.log(JSON.stringify(apiResponse, null, 2));
         console.log("****************************************\n");
 
         return res.status(200).json({
             response_code: apiResponse?.response_code || "200",
             response_message: apiResponse?.response_message || "Success",
-            data: apiResponse?.data || null
+            data: apiResponse?.data || null,
+            raw: apiResponse
         });
     });
 });
 
-// ----------------------------------------------------------------------------------------
-// ✅ 9. 🎟️ ENDPOINT BARU: Book Ticket (POST)
+// 9. 🎟️ ENDPOINT: Book Ticket (POST)
 app.post('/api/transports/book-ticket', async (req, res) => {
     const apiType = 'BOOK_TICKET';
     const endpointPath = '/v1/open-api/transports/book';
     const endpointURL = BOOK_TICKET_ENDPOINT;
 
-    // Ambil User-Agent dari body request (dikirim dari frontend sebagai user identifier/username)
-    const userAgent = req.body.useragen;
-    console.log(`User Identifier (from body/useragen) received: ${userAgent}`);
+    // Ambil fields dari body
+    const {
+        product_code, selling_price, partner_reference_no,
+        order_detail, departure, return: returnTrip,
+        customer, payments, transaction_id, useragen
+    } = req.body;
 
-
-    // Gunakan try-catch untuk menangani error database dan lainnya
-    try {
-        const { transaction_id } = req.body;
-
-        // Validasi wajib
-        if (!transaction_id) {
-            return res.status(400).json({
-                response_code: "40000001",
-                response_message: "**transaction_id** wajib diisi.",
-                data: null
-            });
-        }
-
-        // Build request ke Klikoo
-        const requestBody = {
-            transaction_id: String(transaction_id)
-        };
-
-        // Logging REQUEST sebelum ke Klikoo
-        console.log(`\n========== REQUEST ${apiType} ==========`);
-        console.log("Endpoint:", endpointURL + endpointPath);
-        console.log("Body Sent:", JSON.stringify(requestBody, null, 2));
-        console.log("========================================\n");
-
-        // Panggil Klikoo API
-        callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, async (apiResponse) => {
-
-            // Logging RESPONSE dari Klikoo
-            console.log(`\n********** RESPONSE ${apiType} **********`);
-            console.log("Raw Response:");
-            console.log(JSON.stringify(apiResponse, null, 2));
-            console.log("****************************************\n");
-
-            const { response_code, response_message, data } = apiResponse;
-
-            // ==============================================================
-            // LOGIKA PENYIMPANAN KE DATABASE (Jika API berhasil)
-            // ==============================================================
-            // Cek kondisi sukses dari API (kode 201052001 dan status SUCCESS)
-            if (response_code === "201052001" && data?.status === "SUCCESS") {
-                console.log("API Success. Preparing to save to DB...");
-
-                const {
-                    transaction_id: klikoo_transaction_id,
-                    status,
-                    booking_codes
-                } = data;
-
-                // Query SQL untuk menyimpan data booking, termasuk user_agent
-                const sql = `
-                    INSERT INTO ticket_bookings 
-                    (transaction_id, api_response_code, api_response_message, status, departure_code, return_code, user_agent)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE
-                    api_response_code = VALUES(api_response_code),
-                    api_response_message = VALUES(api_response_message),
-                    status = VALUES(status),
-                    departure_code = VALUES(departure_code),
-                    return_code = VALUES(return_code),
-                    user_agent = VALUES(user_agent); 
-                `;
-
-                // Array nilai yang akan di-bind ke query SQL
-                const values = [
-                    klikoo_transaction_id,
-                    response_code,
-                    response_message,
-                    status,
-                    booking_codes?.departure || null,
-                    booking_codes?.return || null,
-                    userAgent || null // Menggunakan userAgent dari req.body.useragen
-                ];
-
-                try {
-                    // Eksekusi query INSERT/UPDATE
-                    const [result] = await pool.execute(sql, values);
-                    console.log(`[DB SUCCESS] Booking saved/updated. Insert ID: ${result.insertId || 'N/A'}, Affected Rows: ${result.affectedRows}`);
-                } catch (dbError) {
-                    console.error("[DB ERROR] Failed to save booking to database:", dbError.message);
-                    // Lanjutkan untuk mengirim respons ke klien meskipun DB error
-                }
-            }
-            // ==============================================================
-
-            // Kirim respons akhir ke klien (dari API eksternal)
-            return res.status(200).json({
-                response_code: response_code || "200",
-                response_message: response_message || "Success",
-                data: data || null
-            });
-        });
-
-    } catch (error) {
-        // Menangani error tak terduga (misalnya JSON parsing error atau pool error)
-        console.error("Internal Server Error in route:", error);
-        return res.status(500).json({
-            response_code: "50000000",
-            response_message: "Internal Server Error",
+    // minimal validasi
+    if (!product_code || !selling_price || !partner_reference_no || !order_detail || !departure || !customer || !payments) {
+        return res.status(400).json({
+            response_code: "40000001",
+            response_message: "Field wajib: product_code, selling_price, partner_reference_no, order_detail, departure, customer, payments",
             data: null
         });
     }
+
+    // Jika client mengirim transaction_id (opsional) gunakan, jika tidak sediakan sendiri di backend
+    const requestBody = {
+        product_code: product_code.toUpperCase(),
+        selling_price,
+        partner_reference_no,
+        order_detail,
+        departure,
+        customer,
+        payments,
+        ...(returnTrip && { return: returnTrip }),
+        ...(transaction_id && { transaction_id: String(transaction_id) })
+    };
+
+    console.log(`\n========== REQUEST ${apiType} ==========`);
+    console.log("Endpoint:", endpointURL);
+    console.log("Body Sent:", JSON.stringify(requestBody, null, 2));
+    console.log("========================================\n");
+
+    callSignedApi(apiType, endpointURL, endpointPath, METHOD_POST, requestBody, async (apiResponse) => {
+        console.log(`\n********** RESPONSE ${apiType} **********`);
+        console.log(JSON.stringify(apiResponse, null, 2));
+        console.log("****************************************\n");
+
+        const { response_code, response_message, data } = apiResponse;
+
+        // Jika sukses, simpan ke DB (sesuaikan kondisi sukses dari dokumentasi Klikoo)
+        if (response_code === "201052001" && data?.status === "SUCCESS") {
+            console.log("API Success. Preparing to save to DB...");
+
+            const klikoo_transaction_id = data.transaction_id || null;
+            const status = data.status || null;
+            const booking_codes = data.booking_codes || {};
+
+            const sql = `
+                INSERT INTO ticket_bookings 
+                (transaction_id, api_response_code, api_response_message, status, departure_code, return_code, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                api_response_code = VALUES(api_response_code),
+                api_response_message = VALUES(api_response_message),
+                status = VALUES(status),
+                departure_code = VALUES(departure_code),
+                return_code = VALUES(return_code),
+                user_agent = VALUES(user_agent);
+            `;
+
+            const values = [
+                klikoo_transaction_id,
+                response_code,
+                response_message,
+                status,
+                booking_codes?.departure || null,
+                booking_codes?.return || null,
+                useragen || null
+            ];
+
+            try {
+                const [result] = await pool.execute(sql, values);
+                console.log(`[DB SUCCESS] Booking saved/updated. Insert ID: ${result.insertId || 'N/A'}, Affected Rows: ${result.affectedRows}`);
+            } catch (dbError) {
+                console.error("[DB ERROR] Failed to save booking to database:", dbError.message || dbError);
+            }
+        }
+
+        return res.status(200).json({
+            response_code: response_code || "200",
+            response_message: response_message || "Success",
+            data: data || null,
+            raw: apiResponse
+        });
+    });
 });
 
-
-// ROUTE 4.2: GET HISTORY by User Agent (GET) - ROUTE BARU
+// GET HISTORY by User Agent (GET)
 app.get('/api/transports/history/:useragen', async (req, res) => {
     const userAgent = req.params.useragen;
     console.log(`\n========== REQUEST HISTORY by User Agent ==========`);
@@ -715,7 +647,6 @@ app.get('/api/transports/history/:useragen', async (req, res) => {
         });
     }
 
-    // Query untuk mengambil semua kolom data booking berdasarkan user_agent
     const sql = `
         SELECT 
             id, 
@@ -737,16 +668,13 @@ app.get('/api/transports/history/:useragen', async (req, res) => {
 
     try {
         const [rows] = await pool.execute(sql, [userAgent]);
-
         console.log(`[DB SUCCESS] Found ${rows.length} records for user ${userAgent}`);
 
-        // Mengirim data riwayat dalam format JSON
         return res.status(200).json({
             response_code: "20000000",
             response_message: "History berhasil diambil.",
-            data: rows // rows adalah array of objects dari hasil query
+            data: rows
         });
-
     } catch (error) {
         console.error("Internal Server Error fetching history:", error);
         return res.status(500).json({
@@ -756,7 +684,6 @@ app.get('/api/transports/history/:useragen', async (req, res) => {
         });
     }
 });
-
 
 // --- SERVER LISTENER ---
 app.listen(PORT, () => {
@@ -768,7 +695,6 @@ app.listen(PORT, () => {
     console.log(`- Boarding (POST): http://localhost:${PORT}/api/transports/boarding-location`);
     console.log(`- Destination (POST): http://localhost:${PORT}/api/transports/destination-location`);
     console.log(`- JADWAL (POST): http://localhost:${PORT}/api/transports/trips`);
-    // ✅ ENDPOINT BARU
     console.log(`- DETAIL TRIP (POST): http://localhost:${PORT}/api/transports/trips-detail`);
     console.log(`- BLOCK SEAT (POST): http://localhost:${PORT}/api/transports/block-seat`);
     console.log(`- BOOK TICKET (POST): http://localhost:${PORT}/api/transports/book-ticket`);
