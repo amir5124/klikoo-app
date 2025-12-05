@@ -181,29 +181,28 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
     try {
         accessToken = await getAccessToken();
     } catch (error) {
+        console.error(`[${apiType}] ERROR saat mengambil Access Token:`, error.message);
         return callback({
             response_code: "500",
-            response_message: `Gagal mendapatkan ${apiType} karena masalah Access Token.`,
+            response_message: `Gagal mendapatkan ${apiType} karena gagal mengambil Access Token.`,
             data: null,
             error: error.message || error
         });
     }
 
-    const token = accessToken;
     const timestampHeader = moment().format('YYYY-MM-DDTHH:mm:ss.000+07:00');
-    const timestampSig = timestampHeader;
     const signaturePayload = (method === METHOD_GET) ? {} : requestBody || {};
 
     let digitalSignature;
     try {
-        digitalSignature = generateDigitalSignature(method, endpointPath, token, signaturePayload, timestampSig);
+        digitalSignature = generateDigitalSignature(method, endpointPath, accessToken, signaturePayload, timestampHeader);
     } catch (error) {
-        console.error(`Kesalahan menghitung Digital Signature untuk ${apiType}:`, error.message);
+        console.error(`[${apiType}] Gagal menghitung Digital Signature:`, error.message);
         return callback({
             response_code: "500",
             response_message: "Gagal menghitung Digital Signature.",
             data: null,
-            error: error.message || error
+            error: error.message
         });
     }
 
@@ -221,23 +220,51 @@ async function callSignedApi(apiType, endpointURL, endpointPath, method, request
         ...(method === METHOD_POST && { data: requestBody })
     };
 
-    console.log(`[${apiType}] Request Headers:`, headers);
-    console.log(`[${apiType}] Request Body Sent: ${JSON.stringify(requestBody)}`);
-    console.log(`[${apiType}] Memanggil API: ${endpointURL}`);
+    // ------------------------------------
+    // 🔍 DEBUG LOGGING REQUEST DETAIL
+    // ------------------------------------
+    console.log(`\n================== [REQUEST: ${apiType}] ==================`);
+    console.log("URL:", endpointURL);
+    console.log("METHOD:", method);
+    console.log("Endpoint Path:", endpointPath);
+    console.log("Request Headers:", JSON.stringify(headers, null, 2));
+    console.log("Request Body:", JSON.stringify(requestBody, null, 2));
+    console.log("===========================================================\n");
 
     try {
         const response = await axios(options);
-        console.log(`[${apiType}] Data berhasil diterima. Status: ${response.status}`);
+
+        // ------------------------------------
+        // 🟢 RESPONSE LOG SUKSES
+        // ------------------------------------
+        console.log(`\n****************** [RESPONSE: ${apiType}] ******************`);
+        console.log("Status Code:", response.status);
+        console.log("Response Headers:", JSON.stringify(response.headers, null, 2));
+        console.log("Response Body:", JSON.stringify(response.data, null, 2));
+        console.log("************************************************************\n");
+
         return callback(response.data);
+
     } catch (error) {
+        // ------------------------------------
+        // 🔴 RESPONSE LOG ERROR
+        // ------------------------------------
         if (error.response) {
-            console.error(`[${apiType}] ERROR ${error.response.status}:`, error.response.data);
+            console.error(`\n####### [ERROR RESPONSE: ${apiType}] #######`);
+            console.error("Status Code:", error.response.status);
+            console.error("Response Body:", JSON.stringify(error.response.data, null, 2));
+            console.error("###########################################\n");
+
             return callback(error.response.data);
         }
-        console.error(`[${apiType}] ERROR INTERNAL:`, error.message);
+
+        console.error(`\n####### [ERROR INTERNAL: ${apiType}] #######`);
+        console.error("Internal Error:", error.message);
+        console.error("############################################\n");
+
         return callback({
             response_code: "500",
-            response_message: "Kesalahan server internal atau jaringan",
+            response_message: "Kesalahan internal server atau jaringan",
             data: null,
             error: error.message
         });
@@ -267,9 +294,12 @@ app.get('/api/client-balance', async (req, res) => {
     const endpointURL = BALANCE_ENDPOINT;
     const requestBody = {};
 
-    console.log(`--- Memulai Proses Get ${apiType} ---`);
+    console.log(`\n🚀 Memulai Proses API ${apiType}...`);
+
     callSignedApi(apiType, endpointURL, endpointPath, METHOD_GET, requestBody, (apiResponse) => {
-        return res.status(apiResponse?.response_code && apiResponse.response_code.startsWith('2') ? 200 : 200).json({
+        console.log(`\n📥 API RESPONSE DITERIMA UNTUK ${apiType}:`, JSON.stringify(apiResponse, null, 2));
+
+        return res.status(200).json({
             response_code: apiResponse?.response_code || "200",
             response_message: apiResponse?.response_message || "Success",
             data: apiResponse?.data || null,
@@ -277,6 +307,7 @@ app.get('/api/client-balance', async (req, res) => {
         });
     });
 });
+
 
 // 3. ENDPOINT: Mendapatkan Detail Atraksi (POST)
 app.post('/api/get-attraction-detail', async (req, res) => {
